@@ -198,7 +198,40 @@ Fixpoint index {K : Set} {T : type} {C : choice T} {x : sem K T} (k : chosen T C
 Definition generates {K : Set} {T : type} {C : choice T} (i : initial K T C) (x : sem K T) (k : chosen T C x) :=
   forall (p : path K T C), index k p = from i p.
 
+(** * Properties of test case generators *)
 
+(** Ordering between individual inputs.
+    [x] subsumes [y] if [x] distinguishes polymorphic functions
+    better than [y]. *)
+Definition
+  subsumes {K H : Set} {T : type} (S : Set -> Set)
+  (x : sem K T) (y : sem H T) : Prop :=
+  forall (f g : forall {L}, sem L T -> S L), f x = g x -> f y = g y.
+
+(** Completeness.
+    Every possible input [y] is subsumed
+    by a generated test case [x]. *)
+Definition
+  complete (T : type) (S : Set -> Set)
+  (Generated : forall K, sem K T -> Prop) : Prop :=
+  forall H (y : sem H T), exists K x, Generated K x /\ subsumes S x y.
+
+(** Canonicity properties. *)
+
+(** Optimality of a test case.
+    Every generated test case [x] is as general as possible:
+    if another [y] subsumes [x], then [x] also subsumes [y]. *)
+Definition
+  optimality (T : type) (S : Set -> Set)
+  (Generated : forall K, sem K T -> Prop) : Prop :=
+  forall K x, Generated K x -> forall H (y : sem H T), subsumes S x y -> subsumes S y x.
+
+(** Non-redundancy.
+    Generated test cases don't subsume each other. *)
+Definition
+  non_redundant (T : type) (S : Set -> Set)
+  (Generated : forall K, sem K T -> Prop) : Prop :=
+  forall K x H y, Generated K x -> Generated H y -> subsumes S x y -> JMeq x y.
 
 (*  
 Inductive generate (K : Set) (T : type) (C : choice T) (x : 
