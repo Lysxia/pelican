@@ -1,5 +1,7 @@
 Require Import List.
 Require Import Nat.
+Require Import Tactics.
+Require Import Program.
 
 Inductive type :=
 | TyUnit : type
@@ -79,7 +81,7 @@ Definition initial (K : Set) (T : type) (C : choice T) : Type :=
 
 Inductive chosen
           {K : Set}
-  : forall (T : type), @choice K T -> sem K T -> Prop :=
+  : forall (T : type), choice T -> sem K T -> Set :=
 | ChUnit : chosen TyUnit CUnit tt
 | ChProduct : forall T1 T2 C1 C2 x1 x2,
     chosen T1 C1 x1 -> chosen T2 C2 x2 -> chosen (TyProduct T1 T2) (CProduct C1 C2) (x1, x2)
@@ -97,23 +99,83 @@ Arguments ChRight [K T1 T2 C2 x2] _.
 Arguments ChArrow [K T U c x] _.
 Arguments ChAlpha [K] _.
 
-Fixpoint index {K : Set} {T : type} {C : choice T} {x : sem K T} (k : chosen T C x) (p : path K T C) : K. Admitted.
-  (* :=
-  match p, k with
-  | PHere, ChAlpha x => x
-  | PFun t p1, ChArrow k1 => index (k1 t) p1
-  | PFst p1, ChProduct k1 _ => index k1 p1
-  | PSnd p1, ChProduct _ k2 => index k2 p1
-  | PLeft p1, ChLeft k1 => index k1 p1
-  | PRight p1, ChRight k2 => index k2 p1
-  | _, _ => _
-  end.
-   *)
+
+Fixpoint index {K : Set} {T3 : type} {C : choice T3} {x : sem K T3} (k : chosen T3 C x) (p : path K T3 C) : K :=
+  match p in path _ t1 C return forall x, chosen t1 C x -> K with
+  | PHere =>
+    fun _ k =>
+      match
+        k in chosen _ CAlpha x
+        return K
+      with
+      | ChAlpha x => x
+      end
+  | PFun t p1 =>
+    fun _ k =>
+      match
+        k in chosen _ (@CArrow _ T U c) r
+        return forall t, path K U (c t) -> K
+      with
+      | ChArrow k1 => fun t p1 => index (k1 t) p1
+      end t p1
+  | @PFst _ T1 _ C1 _ p1 =>
+    fun _ k1 =>
+      match
+        k1 in chosen _ (@CProduct _ T1 _ C1 _) r
+        return path _ T1 C1 -> K
+      with
+      | ChProduct k1 _ => fun p1 => index k1 p1
+      end p1
+  | @PSnd _ _ T2 _ C2 p2 =>
+    fun _ k =>
+      match
+        k in chosen _ (@CProduct _ _ T2 _ C2) r
+        return path K T2 C2 -> K
+      with
+      | ChProduct _ k2 =>
+        fun p2 => index k2 p2
+      end p2
+  | @PLeft _ T1 _ C1 p1 =>
+    fun _ k =>
+      match
+        k in chosen _ (@CLeft _ T1 _ C1) r
+        return path K T1 C1 -> K
+      with
+      | ChLeft k1 => fun p1 => index k1 p1
+      end p1
+  | @PRight _ _ T2 C2 p2 =>
+    fun _ k =>
+      match
+        k in chosen _ (@CRight _ _ T2 C2) r
+        return path K T2 C2 -> K
+      with
+      | ChRight k2 => fun p2 => index k2 p2
+      end p2
+  end x k.
 
 Definition generates {K : Set} {T : type} {C : choice T} (i : initial K T C) (x : sem K T) (k : chosen T C x) :=
   forall (p : path K T C), index k p = from i p.
-  
+
+
 
 (*  
 Inductive generate (K : Set) (T : type) (C : choice T) (x : 
+*)
+(*
+Inductive project
+          {K : Set} {B : Set} (f : K -> B)
+  : forall (T : type) (C : @choice K T),
+    (path K T C -> B) ->
+    sem K T ->
+    sem B T ->
+    Set :=
+| ProjAlpha : forall x y, project f TyAlpha CAlpha (fun PHere => y) x y
+| ProjUnit : project f TyUnit CUnit (fun p => match p with end) tt tt
+| ProjProduct : forall T1 T2 C1 C2 g1 g2 x1 x2 y1 y2,
+    project f T1 C1 g1 x1 y1 -> project f T2 C2 g2 x2 y2 ->
+    project f (TyProduct T1 T2) (CProduct C1 C2) (fun p =>
+                                                    match T1, T2, p in path _ (TyProduct T1 T2) (CProduct C1 C2) with
+                                                    | T1, _, PFst p1 => g1 p1
+                                                    | _, T2, PSnd p2 => g2 p2
+                                                    end) (x1, x2) (y1, y2).
 *)
