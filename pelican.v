@@ -3,13 +3,16 @@ Require Import Nat.
 Require Import Tactics.
 Require Import Program.
 
+(** * Parametric types **)
+
+(** Type syntax. T,U,V *)
 Inductive type :=
 | TyUnit : type
-| TyZero : type
-| TyArr  : type -> type -> type
+| TyZero : type (* Empty. *)
+| TyArr  : type -> type -> type (* Functions. *)
 | TyProduct : type -> type -> type
 | TySum : type -> type -> type
-| TyAlpha : type.
+| TyAlpha : type. (* A single type parameter. *)
 
 Infix ":->" := TyArr (at level 30, right associativity) : type_scope.
 
@@ -17,6 +20,8 @@ Definition t := TyAlpha :-> TyAlpha.
 Definition t2 := TyProduct (TyAlpha :-> TyAlpha) TyAlpha.
 Print t2.
 
+(** Interpretation of a type as a Set,
+    parameterized by the interpretation of Alpha. *)
 Fixpoint sem (K : Set) (T : type) : Set :=
   match T with
   | TyAlpha => K
@@ -27,6 +32,19 @@ Fixpoint sem (K : Set) (T : type) : Set :=
   | TyZero => Empty_set
   end.
 
+(** * Paths in values
+
+    We will define a type of "paths" that, given a value of
+    type T, leads to a leaf of type alpha.
+    We actually do this on the semantic level:
+    given a value of type sem K T, a path leads to a leaf of
+    type K. *)
+
+(** Choices. C
+
+    To make sure paths remain valid, we must restrict values
+    of sum types. A "choice" chooses one alternative for
+    every occurence of a sum type. *)
 Inductive choice
           {K : Set}
   : type -> Set :=
@@ -37,19 +55,29 @@ Inductive choice
 | CRight : forall {T1 T2}, choice T2 -> choice (TySum T1 T2)
 | CUnit : choice TyUnit
 | CArrow : forall {T U}, (sem K T -> choice U) -> choice (T :-> U).
+  (* For functions, we make one choice for every argument. *)
 
+(* Paths. p *)
 Inductive path
           (K : Set)
   : forall (T : type), choice T -> Set :=
+
+(* We're at a leaf. *)
 | PHere : path K TyAlpha CAlpha
+
+(* Given a pair, a path goes into either component. *)
 | PFst : forall T1 T2 (C1 : choice T1) (C2 : choice T2),
     path K T1 C1 -> path K (TyProduct T1 T2) (CProduct C1 C2)
 | PSnd : forall T1 T2 (C1 : choice T1) (C2 : choice T2),
     path K T2 C2 -> path K (TyProduct T1 T2) (CProduct C1 C2)
+
+(* For sums, the choice allows only one alternative. *)
 | PLeft : forall T1 T2 (C1 : choice T1),
     path K T1 C1 -> path K (TySum T1 T2) (CLeft C1)
 | PRight : forall T1 T2 (C2 : choice T2),
     path K T2 C2 -> path K (TySum T1 T2) (CRight C2)
+
+(* A path in a function specifies an argument to continue. *)
 | PFun : forall T U (c : sem K T -> choice U),
     forall (t : sem K T), path K U (c t) -> path K (T :-> U) (CArrow c).
 
@@ -60,6 +88,7 @@ Arguments PLeft [K T1 T2 C1] p.
 Arguments PRight [K T1 T2 C2] p.
 Arguments PFun [K T U c] t p.
 
+(** Isomorphism between A and B. *)
 Inductive iso (A : Set) (B : Set) : Set :=
 | Iso : forall (constr : B -> A) (destr : A -> B),
     (forall a, constr (destr a) = a) ->
@@ -76,9 +105,18 @@ Definition from {A} {B} (i : iso A B) : B -> A :=
   | Iso _ _ constr _ _ _ => constr
   end.
 
+(** We want to interpret [T] at the type of its own paths.
+    But it seems unlikely that we can have literally
+    [K = path K T C]; isomorphism is the next best thing.
+
+    The poorly chosen name of [initial] refers to the fact
+    that this somehow corresponds to an initial algebra
+    construction. *)
 Definition initial (K : Set) (T : type) (C : choice T) : Type :=
   iso K (path K T C).
 
+(** The predicate [chosen T C x] states that
+    a value [x : sem K T] matches the given [choice]. *)
 Inductive chosen
           {K : Set}
   : forall (T : type), choice T -> sem K T -> Set :=
@@ -99,9 +137,10 @@ Arguments ChRight [K T1 T2 C2 x2] _.
 Arguments ChArrow [K T U c x] _.
 Arguments ChAlpha [K] _.
 
-
-Fixpoint index {K : Set} {T3 : type} {C : choice T3} {x : sem K T3} (k : chosen T3 C x) (p : path K T3 C) : K :=
-  match p in path _ t1 C return forall x, chosen t1 C x -> K with
+(** Given a path [p : path K T C] and a (chosen) value [x : sem K T],
+    we can follow the path to a leaf of type [K]. *)
+Fixpoint index {K : Set} {T : type} {C : choice T} {x : sem K T} (k : chosen T C x) (p : path K T C) : K :=
+  match p in path _ T C return forall x, chosen T C x -> K with
   | PHere =>
     fun _ k =>
       match
@@ -153,6 +192,9 @@ Fixpoint index {K : Set} {T3 : type} {C : choice T3} {x : sem K T3} (k : chosen 
       end p2
   end x k.
 
+(** A property that should be satisfied by values produced
+    by our generator (to be defined): every leaf encodes
+    the path to itself. *)
 Definition generates {K : Set} {T : type} {C : choice T} (i : initial K T C) (x : sem K T) (k : chosen T C x) :=
   forall (p : path K T C), index k p = from i p.
 
