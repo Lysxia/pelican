@@ -198,6 +198,132 @@ Fixpoint index {K : Set} {T : type} {C : choice T} {x : sem K T} (k : chosen T C
 Definition generates {K : Set} {T : type} {C : choice T} (i : initial K T C) (x : sem K T) (k : chosen T C x) :=
   forall (p : path K T C), index k p = from i p.
 
+Inductive variance : Set :=
+| CO : variance
+| CONTRA : variance.
+
+Definition covary (co : variance) : variance :=
+  match co with
+  | CO => CONTRA
+  | CONTRA => CO
+  end.
+
+Inductive variant : variance -> type -> Set :=
+| VAlpha : variant CO TyAlpha
+| VUnit : forall co, variant co TyUnit
+| VZero : forall co, variant co TyZero
+| VProduct : forall co {T1 T2},
+    variant co T1 -> variant co T2 -> variant co (TyProduct T1 T2)
+| VSum : forall co {T1 T2},
+    variant co T1 -> variant co T2 -> variant co (TySum T1 T2)
+| VArrow : forall co {T U},
+    variant (covary co) T ->
+    variant co U ->
+    variant co (T :-> U).
+
+Definition switch {U : Type} (co : variance) (K : U) (H : U) :=
+  match co with
+  | CO => K
+  | CONTRA => H
+  end.
+
+Lemma switch_covary :
+  forall {U : Type} (co : variance),
+    switch (covary co) = (fun (K H : U) => switch co H K).
+Proof.
+  intros.
+  destruct co; auto.
+Qed.
+
+Fixpoint map_co
+         {K H : Set} {T : type} {co : variance}
+         (v : variant co T) (f : K -> H)
+  : sem (switch co K H) T ->
+    sem (switch co H K) T :=
+  match
+    v in variant co T
+    return sem (switch co K H) T -> sem (switch co H K) T
+  with
+  | VAlpha => f
+  | VUnit _ => fun x => x
+  | VZero _ => fun x => x
+  | VProduct _ v1 v2 =>
+    fun x =>
+      match x with
+      | (x1, x2) => (map_co v1 f x1, map_co v2 f x2)
+      end
+  | VSum _ v1 v2 =>
+    fun x =>
+      match x with
+      | inl x1 => inl (map_co v1 f x1)
+      | inr x2 => inr (map_co v2 f x2)
+      end
+  | @VArrow co T U v1 v2 =>
+    fun x =>
+      let comap := eq_rect
+                     (switch (covary co))
+                     (fun sw => sem (sw K H) T -> sem (sw H K) T)
+                     (map_co v1 f)
+                     (fun K H => switch co H K)
+                     (switch_covary co)
+      in fun t => map_co v2 f (x (comap t))
+  end.
+
+Definition covariant := variant CO.
+
+Inductive project
+          {K : Set} {B : Set} (f : K -> B)
+  : forall (T : type) (C : @choice K T),
+    (path K T C -> B) ->
+    sem K T ->
+    sem B T ->
+    Set :=
+| ProjAlpha : forall x y, project f TyAlpha CAlpha (fun PHere => y) x y
+| ProjUnit : project f TyUnit CUnit (fun p => match p with end) tt tt
+| ProjProduct : forall T1 T2 C1 C2 g1 g2 x1 x2 y1 y2,
+    project f T1 C1 g1 x1 y1 -> project f T2 C2 g2 x2 y2 ->
+    project f (TyProduct T1 T2) (CProduct C1 C2)
+            (fun p =>
+               match
+                 p in path _ _ (@CProduct _ T1 T2 C1 C2)
+                 return forall A,
+                   (path _ T1 C1 -> A) -> (path _ T2 C2 -> A) -> A
+               with
+               | PFst p1 => fun _ g1 _ => g1 p1
+               | PSnd p2 => fun _ _ g2 => g2 p2
+               end _ g1 g2) (x1, x2) (y1, y2)
+| ProjLeft : forall T1 T2 C1 g1 x1 y1,
+    project f T1 C1 g1 x1 y1 ->
+    project f (TySum T1 T2) (CLeft C1)
+            (fun p =>
+               match
+                 p in path _ _ (@CLeft _ T1 _ C1)
+                 return forall A, (path _ T1 C1 -> A) -> A
+               with
+               | PLeft p1 => fun _ g1 => g1 p1
+               end _ g1) (inl x1) (inl y1)
+| ProjRight : forall T1 T2 C2 g2 x2 y2,
+    project f T2 C2 g2 x2 y2 ->
+    project f (TySum T1 T2) (CRight C2)
+            (fun p =>
+               match
+                 p in path _ _ (@CRight _ _ T2 C2)
+                 return forall A, (path _ T2 C2 -> A) -> A
+               with
+               | PRight p2 => fun _ g2 => g2 p2
+               end _ g2) (inr x2) (inr y2)
+| ProjArrow : forall T U c g x y (v : covariant T),
+    (forall (t : sem K T),
+        project f U (c t) (g t) (x t) (y (map_co v f t))) ->
+    project f (T :-> U) (CArrow c)
+            (fun p =>
+               match
+                 p in path _ _ (@CArrow _ T U c)
+                 return forall A, (forall t, path _ U (c t) -> A) -> A
+               with
+               | PFun t pf => fun _ g => g t pf
+               end _ g) x y.
+
 (** * Properties of test case generators *)
 
 (** Ordering between individual inputs.
@@ -235,22 +361,4 @@ Definition
 
 (*  
 Inductive generate (K : Set) (T : type) (C : choice T) (x : 
-*)
-(*
-Inductive project
-          {K : Set} {B : Set} (f : K -> B)
-  : forall (T : type) (C : @choice K T),
-    (path K T C -> B) ->
-    sem K T ->
-    sem B T ->
-    Set :=
-| ProjAlpha : forall x y, project f TyAlpha CAlpha (fun PHere => y) x y
-| ProjUnit : project f TyUnit CUnit (fun p => match p with end) tt tt
-| ProjProduct : forall T1 T2 C1 C2 g1 g2 x1 x2 y1 y2,
-    project f T1 C1 g1 x1 y1 -> project f T2 C2 g2 x2 y2 ->
-    project f (TyProduct T1 T2) (CProduct C1 C2) (fun p =>
-                                                    match T1, T2, p in path _ (TyProduct T1 T2) (CProduct C1 C2) with
-                                                    | T1, _, PFst p1 => g1 p1
-                                                    | _, T2, PSnd p2 => g2 p2
-                                                    end) (x1, x2) (y1, y2).
 *)
