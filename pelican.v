@@ -2,6 +2,9 @@ Require Import List.
 Require Import Nat.
 Require Import Tactics.
 Require Import Program.
+Require Import Setoid.
+Require Import SetoidClass.
+Require Import Relation_Definitions.
 
 (** * Parametric types **)
 
@@ -31,6 +34,48 @@ Fixpoint sem (K : Set) (T : type) : Set :=
   | TyUnit => unit
   | TyZero => Empty_set
   end.
+
+Fixpoint sem_eq (K : Set) (R : K -> K -> Prop)
+         (T : type) : sem K T -> sem K T -> Prop :=
+  match T with
+  | TyUnit => fun _ _ => True
+  | TyZero => fun _ _ => True
+  | T :-> U =>
+    fun x y =>
+      forall r s, sem_eq K R T r s -> sem_eq K R U (x r) (y s)
+  | TyProduct T1 T2 =>
+    fun x y =>
+      let (x1, x2) := x in
+      let (y1, y2) := y in
+      sem_eq K R T1 x1 y1 /\ sem_eq K R T2 x2 y2
+  | TySum T1 T2 =>
+    fun x y =>
+      match x, y with
+      | inl x1, inl y1 => sem_eq K R T1 x1 y1
+      | inr x2, inr y2 => sem_eq K R T2 x2 y2
+      | _, _ => False
+      end
+  | TyAlpha => R
+  end.
+
+(*
+Inductive sem_eq (K : Set) (R : K -> K -> Prop)
+  : forall (T : type), sem K T -> sem K T -> Prop :=
+| SEqAlpha : forall x y, R x y -> sem_eq K R TyAlpha x y
+| SEqProduct : forall T1 T2 x1 x2 y1 y2,
+    sem_eq K R T1 x1 y1 ->
+    sem_eq K R T2 x2 y2 ->
+    sem_eq K R (TyProduct T1 T2) (x1, x2) (y1, y2)
+| SEqLeft : forall T1 T2 x1 y1,
+    sem_eq K R T1 x1 y1 ->
+    sem_eq K R (TySum T1 T2) (inl x1) (inl y1)
+| SEqRight : forall T1 T2 x2 y2,
+    sem_eq K R T2 x2 y2 ->
+    sem_eq K R (TySum T1 T2) (inr x2) (inr y2)
+| SEqFun : forall T U x y,
+    (forall r s, sem_eq K R T r s -> sem_eq K R U (x r) (y s)) ->
+    sem_eq K R (T :-> U) x y.
+ *)
 
 (** * Paths in values
 
