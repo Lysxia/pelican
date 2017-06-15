@@ -5,6 +5,7 @@ Require Import Program.
 Require Import Setoid.
 Require Import SetoidClass.
 Require Import Relation_Definitions.
+Require Import Specif.
 
 (** * Parametric types **)
 
@@ -35,14 +36,145 @@ Fixpoint sem (K : Set) (T : type) : Set :=
   | TyZero => Empty_set
   end.
 
-Fixpoint sem_eq (K : Set) (R : K -> K -> Prop)
-         (T : type) : sem K T -> sem K T -> Prop :=
+(*
+Record Setoid : Type :=
+  mkSetoid
+    { carrier : Type;
+      rel : relation carrier;
+      equiv : equivalence carrier rel }.
+ *)
+
+Instance unit_setoid : Setoid unit :=
+  { equiv := fun _ _ => True }.
+Proof.
+  split; intro; auto.
+Qed.
+
+Instance empty_setoid : Setoid Empty_set :=
+  { equiv := fun _ _ => False }.
+Proof.
+  split; intro; auto.
+  destruct x.
+Qed.
+
+Print equiv.
+
+Instance pair_setoid A B `(a : Setoid A) `(b : Setoid B)
+  : Setoid (A * B) :=
+  { equiv :=
+      fun x y =>
+        let (a1, b1) := x in
+        let (a2, b2) := y in
+        a1 == a2 /\ b1 == b2 }.
+Proof.
+  split; intro.
+  - destruct x.
+    split.
+    + apply a.
+    + apply b.
+  - intros y H; destruct x, y.
+    split.
+    + apply a. apply H.
+    + apply b; apply H.
+  - intros y z H I. destruct x as [x1 x2], y as [y1 y2], z as [z1 z2].
+    split.
+    + apply (@setoid_trans _ a x1 y1 z1).
+      * apply H. * apply I.
+    + apply (@setoid_trans _ b x2 y2 z2).
+      * apply H. * apply I.
+Qed.
+
+Instance sum_setoid A1 A2 `(a1 : Setoid A1) `(a2 : Setoid A2)
+  : Setoid (A1 + A2) :=
+  { equiv :=
+      fun x y =>
+        match x, y with
+        | inl x1, inl y1 => x1 == y1
+        | inr x2, inr y2 => x2 == y2
+        | _, _ => False
+        end }.
+Proof.
+  split.
+  - intro x; destruct x.
+    + apply a1.
+    + apply a2.
+  - intros x y.
+    destruct x as [x1 | x2], y as [y1 | y2]; auto.
+    + apply a1; apply H.
+    + apply a2; apply H.
+  - intros x y z Hx Hy.
+    destruct x as [x1 | x2], y as [y1 | y2], z as [z1 | z2]; auto.
+    + apply (@setoid_trans _ _ x1 y1 z1).
+      * apply Hx. * apply Hy.
+    + destruct Hx.
+    + destruct Hx.
+    + apply (@setoid_trans _ _ x2 y2 z2).
+      * apply Hx. * apply Hy.
+Qed.
+
+Record smorph (A : Type) (B : Type)
+       `{S_A : Setoid A} `{S_B : Setoid B}
+  : Type :=
+  mksmorph
+    { smorph_f : A -> B;
+      smorph_equiv : forall a1 a2, a1 == a2 -> smorph_f a1 == smorph_f a2 }.
+
+Instance smorph_setoid A B `(S_A : Setoid A) `(S_B : Setoid B) : Setoid (smorph A B) :=
+  { equiv :=
+      fun f g =>
+        forall a, smorph_f _ _ f a == smorph_f _ _ g a}.
+Proof.
+  split.
+  - intros f a.
+    apply S_B.
+  - intros f g H a.
+    apply S_B. apply H.
+  - intros f g h Hf Hg a.
+    apply (@setoid_trans _ S_B (smorph_f _ _ f a) (smorph_f _ _ g a) (smorph_f _ _ h a)).
+    + apply Hf.
+    + apply Hg.
+Qed.
+
+Print existT.
+
+Locate "*".
+
+Fixpoint sem_eq (K : Set) `{K_S : Setoid K} (T : type) : { S : Set & `(Setoid S) } :=
   match T with
-  | TyUnit => fun _ _ => True
-  | TyZero => fun _ _ => True
+  | TyUnit => existT _ unit unit_setoid
+  | TyZero => existT _ Empty_set empty_setoid
+  | T :-> U =>
+    match sem_eq K T, sem_eq K U with
+    | existT _ KT KT_S, existT _ KU KU_S =>
+      existT _ (@smorph KT KU KT_S KU_S) (smorph_setoid KT KU KT_S KU_S)
+    end
+  | TyProduct T1 T2 =>
+    match sem_eq K T1, sem_eq K T2 with
+    | existT _ KT1 KT1_S, existT _ KT2 KT2_S =>
+      existT _ (prod KT1 KT2) (pair_setoid KT1 KT2 KT1_S KT2_S)
+    end
+  | TySum T1 T2 =>
+    match sem_eq K T1, sem_eq K T2 with
+    | existT _ KT1 KT1_S, existT _ KT2 KT2_S =>
+      existT _ (sum KT1 KT2) (sum_setoid KT1 KT2 KT1_S KT2_S)
+    end
+  | TyAlpha =>
+    existT _ K K_S
+  end.
+
+Instance sem_eq_setoid (K : Set) `(K_S : Setoid K) T : Setoid (projT1 (sem_eq K T)) :=
+  projT2 (sem_eq K T).
+
+
+
+
+
+     match T with
+  | TyUnit => tt
+  | TyZero =>
   | T :-> U =>
     fun x y =>
-      forall r s, sem_eq K R T r s -> sem_eq K R U (x r) (y s)
+      forall r s, sem_eq K R T r r -> sem_eq K R T s s -> sem_eq K R T r s -> sem_eq K R U (x r) (y s)
   | TyProduct T1 T2 =>
     fun x y =>
       let (x1, x2) := x in
@@ -58,7 +190,66 @@ Fixpoint sem_eq (K : Set) (R : K -> K -> Prop)
   | TyAlpha => R
   end.
 
-(*
+Lemma
+  sem_eq_sym
+  (K : Set) (R : K -> K -> Prop) (R_sym : forall x y, R x y -> R y x)
+  (T : type)
+  : forall x y, sem_eq K R T x y -> sem_eq K R T y x.
+Proof.
+  induction T; intros x y H; auto.
+  - intros r s Hr Hs I.
+    apply IHT2, H, IHT1.
+    + apply Hs.
+    + apply Hr.
+    + apply I.
+  - destruct x; destruct y; split.
+    + apply IHT1.
+      destruct H; apply H.
+    + apply IHT2.
+      destruct H.
+      apply H0.
+  - destruct x; destruct y; auto.
+    + apply IHT1.
+      apply H.
+    + apply IHT2.
+      apply H.
+  - apply R_sym, H.
+Qed.
+
+Lemma
+  sem_eq_trans
+  (K : Set) (R : K -> K -> Prop)
+  (R_trans : forall x y z, R x y -> R y z -> R x z)
+  (T : type)
+  : forall x y z, sem_eq K R T x y -> sem_eq K R T y z -> sem_eq K R T x z.
+Proof.
+  induction T; intros x y z Hx Hy; auto.
+  - intros r s Hr Hs I.
+    apply IHT2 with (y := y r).
+    apply Hx.
+    + apply Hr.
+    + apply Hr.
+    + apply Hr.
+    + apply Hy.
+      * apply Hr.
+      * apply Hs.
+      * apply I.
+  - destruct x, y as [y1 y2], z.
+    split.
+    + apply IHT1 with (y := y1).
+      * destruct Hx.
+        apply H.
+      * destruct Hy.
+        apply H.
+    + apply IHT2 with (y := y2).
+      * destruct Hx; auto.
+      * destruct Hy; auto.
+  - destruct x, z; inversion y as [y1 | y2]; auto.
+    + apply IHT1 with (y := y1); auto.
+    + apply IHT1. with (y := y). auto.
+
+
+        (*
 Inductive sem_eq (K : Set) (R : K -> K -> Prop)
   : forall (T : type), sem K T -> sem K T -> Prop :=
 | SEqAlpha : forall x y, R x y -> sem_eq K R TyAlpha x y
